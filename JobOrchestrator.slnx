@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="JobOrchestrator.Core/JobOrchestrator.Core.csproj" />
+  <Project Path="JobOrchestrator.Dashboard/JobOrchestrator.Dashboard.csproj" />
+  <Project Path="Samples/JobOrchestrator.Api/JobOrchestrator.Api.csproj" />
+</Solution>
