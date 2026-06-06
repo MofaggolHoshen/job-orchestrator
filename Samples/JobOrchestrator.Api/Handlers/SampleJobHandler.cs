@@ -12,8 +12,6 @@ public class SampleJobHandler : IJobHandler
 {
     private readonly ILogger<SampleJobHandler> _logger;
 
-    public string JobType => typeof(SampleJobHandler).FullName ?? "JobOrchestrator.Api.Handlers.SampleJobHandler";
-
     public string Name => "Sample Job Handler";
 
     public SampleJobHandler(ILogger<SampleJobHandler> logger)

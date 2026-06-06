@@ -34,7 +34,7 @@ public class EmailNotificationHandler : IJobHandler
     private readonly IEmailService _emailService;
     private readonly ILogger<EmailNotificationHandler> _logger;
 
-    public string JobType => "SendEmailNotification";
+    public string Name => "Email Notification Handler";
 
     public EmailNotificationHandler(IEmailService emailService, ILogger<EmailNotificationHandler> logger)
     {
@@ -109,7 +109,7 @@ public class JobsController : ControllerBase
             var jobRequest = new CreateJobRequest
             {
                 Name = "Send notification email",
-                JobType = "SendEmailNotification",
+                HandlerType = typeof(EmailNotificationHandler).FullName!,
                 CronExpression = request.CronExpression,  // e.g., "0 9 * * *" for 9 AM daily
                 MaxRetries = 3,
                 RetryIntervalSeconds = 300,       // Wait 5 minutes between retries
@@ -255,7 +255,7 @@ public class DatabaseBackupHandler : IJobHandler
 {
     private readonly IDbContextFactory<MyDbContext> _dbContextFactory;
 
-    public string JobType => "DatabaseBackup";
+    public string Name => "Database Backup Handler";
 
     public DatabaseBackupHandler(IDbContextFactory<MyDbContext> dbContextFactory)
     {

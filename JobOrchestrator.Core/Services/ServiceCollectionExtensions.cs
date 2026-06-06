@@ -101,7 +101,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a job handler so the scheduler can dispatch to it by <see cref="IJobHandler.JobType"/>.
+    /// Registers a job handler so the scheduler can dispatch to it by its fully qualified type name.
     /// Handlers are resolved per-execution in their own DI scope, so they may have scoped dependencies.
     /// </summary>
     public static ISchedulerBuilder AddJobHandler<THandler>(this ISchedulerBuilder builder)
