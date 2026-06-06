@@ -1,0 +1,180 @@
+@page "/dashboard"
+@using JobOrchestrator.Core.DTOs
+@using JobOrchestrator.Core.Services
+@rendermode InteractiveServer
+@inject IJobService JobService
+@inject ICronValidationService CronValidator
+
+<PageTitle>Dashboard</PageTitle>
+
+<h4 class="mb-4">Overview</h4>
+
+@if (jobs == null)
+{
+    <div class="d-flex align-items-center gap-2 text-muted">
+        <div class="spinner-border spinner-border-sm"></div>
+        <span>Loading...</span>
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-primary bg-opacity-10 p-3">
+                        <i class="bi bi-list-task fs-4 text-primary"></i>
+                    </div>
+                    <div>
+                        <div class="fs-2 fw-bold">@jobs.Count</div>
+                        <div class="text-muted small">Total Jobs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-success bg-opacity-10 p-3">
+                        <i class="bi bi-check-circle fs-4 text-success"></i>
+                    </div>
+                    <div>
+                        <div class="fs-2 fw-bold">@jobs.Count(j => j.IsActive)</div>
+                        <div class="text-muted small">Active Jobs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-warning bg-opacity-10 p-3">
+                        <i class="bi bi-pause-circle fs-4 text-warning"></i>
+                    </div>
+                    <div>
+                        <div class="fs-2 fw-bold">@jobs.Count(j => !j.IsActive)</div>
+                        <div class="text-muted small">Inactive Jobs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-info bg-opacity-10 p-3">
+                        <i class="bi bi-clock-history fs-4 text-info"></i>
+                    </div>
+                    <div>
+                        <div class="fs-2 fw-bold">@totalExecutions</div>
+                        <div class="text-muted small">Recent Executions</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Active Jobs</span>
+                    <a href="/scheduler" class="btn btn-sm btn-outline-primary">Manage All</a>
+                </div>
+                <div class="card-body p-0">
+                    @if (!jobs.Any(j => j.IsActive))
+                    {
+                        <p class="text-muted p-3 mb-0">No active jobs. <a href="/scheduler">Create one</a>.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Handler</th>
+                                    <th>Schedule</th>
+                                    <th>Next Run</th>
+                                    <th>Last Run</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var job in jobs.Where(j => j.IsActive).Take(8))
+                                {
+                                    <tr>
+                                        <td class="fw-medium">@job.Name</td>
+                                        <td><span class="badge bg-light text-dark">@job.HandlerName</span></td>
+                                        <td>
+                                            <span class="badge bg-light text-dark font-monospace">@job.CronExpression</span>
+                                        </td>
+                                        <td class="text-muted small">@(job.NextExecutionTime?.ToString("g") ?? "—")</td>
+                                        <td class="text-muted small">@(job.LastExecutedAt?.ToString("g") ?? "Never")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Recent Executions</span>
+                    <a href="/executions" class="btn btn-sm btn-outline-secondary">View All</a>
+                </div>
+                <div class="card-body p-0">
+                    @if (!recentExecutions.Any())
+                    {
+                        <p class="text-muted p-3 mb-0">No executions yet.</p>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var (jobName, exec) in recentExecutions.Take(8))
+                            {
+                                <div class="list-group-item border-0 py-2">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <div class="fw-medium small">@jobName</div>
+                                            <div class="text-muted" style="font-size:.75rem">@exec.StartTime.ToString("g")</div>
+                                        </div>
+                                        <span class="badge bg-@GetStatusColor(exec.Status)">@exec.Status</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<JobDto>? jobs;
+    private List<(string JobName, JobExecutionDto Exec)> recentExecutions = new();
+    private int totalExecutions;
+
+    protected override async Task OnInitializedAsync()
+    {
+        jobs = await JobService.GetAllJobsAsync();
+        recentExecutions = jobs
+            .SelectMany(j => j.RecentExecutions.Select(e => (j.Name, e)))
+            .OrderByDescending(x => x.e.StartTime)
+            .ToList();
+        totalExecutions = recentExecutions.Count;
+    }
+
+    private static string GetStatusColor(string status) => status switch
+    {
+        "Completed" => "success",
+        "Failed"    => "danger",
+        "Retrying"  => "warning",
+        "Running"   => "info",
+        _           => "secondary"
+    };
+}

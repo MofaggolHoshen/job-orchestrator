@@ -1,0 +1,21 @@
+@inherits LayoutComponentBase
+
+<div class="d-flex min-vh-100">
+    <NavMenu />
+
+    <div class="flex-grow-1 d-flex flex-column">
+        <header class="navbar navbar-light bg-white border-bottom px-4 py-2">
+            <span class="navbar-text fw-semibold">Bulk Message Orchestrator — Scheduler Dashboard</span>
+        </header>
+
+        <main class="flex-grow-1 p-4 bg-light">
+            @Body
+        </main>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

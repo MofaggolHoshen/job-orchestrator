@@ -1,0 +1,494 @@
+@page "/dashboard/scheduler"
+@using JobOrchestrator.Core.DTOs
+@using JobOrchestrator.Core.Services
+@rendermode InteractiveServer
+@inject IJobService JobService
+@inject ICronValidationService CronValidator
+@inject IJobHandlerRegistry HandlerRegistry
+
+<PageTitle>Jobs</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0">Scheduled Jobs</h4>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshJobs">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="OpenCreateModal">
+            <i class="bi bi-plus-lg me-1"></i>New Job
+        </button>
+    </div>
+</div>
+
+@if (alertMessage != null)
+{
+    <div class="alert alert-@alertType alert-dismissible fade show" role="alert">
+        @alertMessage
+        <button type="button" class="btn-close" @onclick="() => alertMessage = null"></button>
+    </div>
+}
+
+@if (jobs == null)
+{
+    <div class="d-flex align-items-center gap-2 text-muted">
+        <div class="spinner-border spinner-border-sm"></div>
+        <span>Loading jobs...</span>
+    </div>
+}
+else if (jobs.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5 text-muted">
+            <i class="bi bi-calendar-x fs-1 mb-3 d-block"></i>
+            <p>No jobs found. <button class="btn btn-link p-0" @onclick="OpenCreateModal">Create your first job</button></p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Name</th>
+                        <th>Handler</th>
+                        <th>Cron</th>
+                        <th>Next Run</th>
+                        <th>Last Run</th>
+                        <th>Retry</th>
+                        <th>Status</th>
+                        <th>Last Result</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in jobs)
+                    {
+                        <tr>
+                            <td class="fw-medium">@job.Name</td>
+                            <td><span class="badge bg-light text-dark border">@job.HandlerName</span></td>
+                            <td>
+                                <span class="badge bg-light text-dark font-monospace"
+                                      title="@CronValidator.GetCronDescription(job.CronExpression)">
+                                    @job.CronExpression
+                                </span>
+                            </td>
+                            <td class="small text-muted">@(job.NextExecutionTime?.ToString("g") ?? "—")</td>
+                            <td class="small text-muted">@(job.LastExecutedAt?.ToString("g") ?? "Never")</td>
+                            <td class="small">
+                                @if (job.RetryPolicy != null)
+                                {
+                                    <span title="@job.RetryPolicy.MaxRetries retries, @job.RetryPolicy.RetryIntervalSeconds s interval">
+                                        @job.RetryPolicy.MaxRetries× / @job.RetryPolicy.RetryIntervalSeconds s
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @(job.IsActive ? "bg-success" : "bg-secondary")">
+                                    @(job.IsActive ? "Active" : "Inactive")
+                                </span>
+                            </td>
+                            <td>
+                                @if (job.RecentExecutions.Any())
+                                {
+                                    var last = job.RecentExecutions.First();
+                                    <span class="badge bg-@GetStatusColor(last.Status)">@last.Status</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">Never run</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-secondary" title="Toggle Active" @onclick="() => ToggleJob(job)">
+                                        <i class="bi @(job.IsActive ? "bi-pause" : "bi-play")"></i>
+                                    </button>
+                                    <button class="btn btn-outline-primary" title="Edit" @onclick="() => OpenEditModal(job)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-warning" title="Reschedule" @onclick="() => OpenRescheduleModal(job)">
+                                        <i class="bi bi-calendar-plus"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" title="Delete" @onclick="() => OpenDeleteConfirm(job)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@* ── Create / Edit Modal ───────────────────────────────────────────────── *@
+@if (showCreateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi @(editingJob == null ? "bi-plus-circle" : "bi-pencil") me-2"></i>
+                        @(editingJob == null ? "Create Job" : $"Edit — {editingJob.Name}")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModals"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" placeholder="Daily report" @bind="formModel.Name" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Registered Handler <span class="text-danger">*</span></label>
+                            <select class="form-select @(registeredHandlers.Count == 0 ? "is-invalid" : "")"
+                                    @bind="formModel.HandlerType"
+                                    disabled="@(editingJob != null)">
+                                <option value="">— Select a job handler —</option>
+                                @foreach (var jt in registeredHandlers)
+                                {
+                                    <option value="@jt.TypeName">@jt.Name</option>
+                                }
+                            </select>
+                            @if (registeredHandlers.Count == 0)
+                            {
+                                <div class="invalid-feedback">No job handlers are registered.</div>
+                            }
+                            @if (editingJob != null)
+                            {
+                                <div class="form-text text-muted">Job type cannot be changed after creation.</div>
+                            }
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-medium">Cron Expression <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   class="form-control font-monospace @(cronError != null ? "is-invalid" : (!string.IsNullOrWhiteSpace(formModel.CronExpression) ? "is-valid" : ""))"
+                                   placeholder="0 9 * * *"
+                                   @bind="formModel.CronExpression"
+                                   @bind:event="oninput"
+                                   @onchange="OnCronExpressionChanged" />
+                            @if (cronError != null)
+                            {
+                                <div class="invalid-feedback">@cronError</div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(cronDescription))
+                            {
+                                <div class="valid-feedback d-block text-success small">
+                                    <i class="bi bi-check-circle me-1"></i>@cronDescription
+                                </div>
+                            }
+                            <div class="form-text">
+                                Examples: <code>0 9 * * *</code> (daily 9 AM) · <code>*/5 * * * *</code> (every 5 min) · <code>0 0 * * MON</code> (Mon midnight)
+                            </div>
+                        </div>
+
+                        <div class="col-12"><hr class="my-0" /><small class="text-muted">Retry Policy (optional)</small></div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">Max Retries</label>
+                            <input type="number" min="0" class="form-control" @bind="formModel.MaxRetries" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">Retry Interval (s)</label>
+                            <input type="number" min="1" class="form-control" @bind="formModel.RetryIntervalSeconds" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">Backoff Multiplier</label>
+                            <input type="number" min="1" step="0.1" class="form-control" @bind="formModel.BackoffMultiplier" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModals">Cancel</button>
+                    <button class="btn btn-primary"
+                            @onclick="SaveJob"
+                            disabled="@(cronError != null || string.IsNullOrWhiteSpace(formModel.Name) || string.IsNullOrWhiteSpace(formModel.CronExpression) || string.IsNullOrWhiteSpace(formModel.HandlerType))">
+                        <i class="bi bi-floppy me-1"></i>Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Reschedule Modal ──────────────────────────────────────────────────── *@
+@if (showRescheduleModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-calendar-plus me-2"></i>Reschedule — @selectedJob?.Name
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModals"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">
+                        This creates a <strong>new job</strong> with the new schedule. The original job is preserved.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Current Schedule</label>
+                        <input type="text" class="form-control font-monospace" value="@selectedJob?.CronExpression" disabled />
+                        <div class="form-text">@CronValidator.GetCronDescription(selectedJob?.CronExpression ?? "")</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">New Cron Expression <span class="text-danger">*</span></label>
+                        <input type="text"
+                               class="form-control font-monospace @(rescheduleError != null ? "is-invalid" : (!string.IsNullOrWhiteSpace(rescheduleModel.NewCronExpression) ? "is-valid" : ""))"
+                               placeholder="0 10 * * *"
+                               @bind="rescheduleModel.NewCronExpression"
+                               @bind:event="oninput"
+                               @onchange="OnRescheduleExpressionChanged" />
+                        @if (rescheduleError != null)
+                        {
+                            <div class="invalid-feedback">@rescheduleError</div>
+                        }
+                        else if (!string.IsNullOrWhiteSpace(rescheduleDescription))
+                        {
+                            <div class="valid-feedback d-block text-success small">
+                                <i class="bi bi-check-circle me-1"></i>@rescheduleDescription
+                            </div>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Reason</label>
+                        <textarea class="form-control" rows="2" placeholder="Why are you rescheduling?" @bind="rescheduleModel.Reason"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModals">Cancel</button>
+                    <button class="btn btn-warning"
+                            @onclick="RescheduleJob"
+                            disabled="@(rescheduleError != null || string.IsNullOrWhiteSpace(rescheduleModel.NewCronExpression))">
+                        <i class="bi bi-calendar-plus me-1"></i>Reschedule
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Delete Confirm Modal ──────────────────────────────────────────────── *@
+@if (showDeleteConfirm)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Delete Job</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModals"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to delete <strong>@selectedJob?.Name</strong>?
+                    This action cannot be undone.
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-secondary btn-sm" @onclick="CloseModals">Cancel</button>
+                    <button class="btn btn-danger btn-sm" @onclick="DeleteJob">
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<JobDto>? jobs;
+    //private List<string> registeredJobTypes = [];
+    private IReadOnlyList<(string TypeName, string Name)> registeredHandlers = [];
+    private bool showCreateModal;
+    private bool showRescheduleModal;
+    private bool showDeleteConfirm;
+    private JobDto? editingJob;
+    private JobDto? selectedJob;
+    private FormModel formModel = new();
+    private RescheduleJobRequest rescheduleModel = new();
+    private string? cronError;
+    private string? rescheduleError;
+    private string? cronDescription;
+    private string? rescheduleDescription;
+    private string? alertMessage;
+    private string alertType = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        //registeredJobTypes = HandlerRegistry.GetRegisteredJobTypes().ToList();
+        registeredHandlers = HandlerRegistry.GetRegisteredHandlers();
+        await RefreshJobs();
+    }
+
+    private async Task RefreshJobs()
+    {
+        try { jobs = await JobService.GetAllJobsAsync(); }
+        catch (Exception ex) { ShowAlert($"Error loading jobs: {ex.Message}", "danger"); }
+    }
+
+    private void OpenCreateModal()
+    {
+        editingJob = null;
+        formModel = new();
+        cronError = null;
+        cronDescription = null;
+        showCreateModal = true;
+    }
+
+    private void OpenEditModal(JobDto job)
+    {
+        editingJob = job;
+        formModel = new()
+        {
+            Name = job.Name,
+            HandlerType = job.HandlerType,
+            CronExpression = job.CronExpression,
+            MaxRetries = job.RetryPolicy?.MaxRetries,
+            RetryIntervalSeconds = job.RetryPolicy?.RetryIntervalSeconds,
+            BackoffMultiplier = job.RetryPolicy?.BackoffMultiplier
+        };
+        cronError = null;
+        cronDescription = CronValidator.GetCronDescription(job.CronExpression);
+        showCreateModal = true;
+    }
+
+    private void OpenRescheduleModal(JobDto job)
+    {
+        selectedJob = job;
+        rescheduleModel = new();
+        rescheduleError = null;
+        rescheduleDescription = null;
+        showRescheduleModal = true;
+    }
+
+    private void OpenDeleteConfirm(JobDto job)
+    {
+        selectedJob = job;
+        showDeleteConfirm = true;
+    }
+
+    private void CloseModals()
+    {
+        showCreateModal = false;
+        showRescheduleModal = false;
+        showDeleteConfirm = false;
+    }
+
+    private async Task SaveJob()
+    {
+        try
+        {
+            if (editingJob == null)
+            {
+                await JobService.CreateJobAsync(new CreateJobRequest
+                {
+                    Name = formModel.Name!,
+                    HandlerType = formModel.HandlerType!,
+                    CronExpression = formModel.CronExpression!,
+                    MaxRetries = formModel.MaxRetries,
+                    RetryIntervalSeconds = formModel.RetryIntervalSeconds,
+                    BackoffMultiplier = formModel.BackoffMultiplier
+                });
+                ShowAlert("Job created successfully.", "success");
+            }
+            else
+            {
+                await JobService.UpdateJobAsync(editingJob.Id, new UpdateJobRequest
+                {
+                    Name = formModel.Name,
+                    CronExpression = formModel.CronExpression,
+                    MaxRetries = formModel.MaxRetries,
+                    RetryIntervalSeconds = formModel.RetryIntervalSeconds,
+                    BackoffMultiplier = formModel.BackoffMultiplier
+                });
+                ShowAlert("Job updated successfully.", "success");
+            }
+            CloseModals();
+            await RefreshJobs();
+        }
+        catch (Exception ex) { ShowAlert($"Error: {ex.Message}", "danger"); }
+    }
+
+    private async Task RescheduleJob()
+    {
+        try
+        {
+            await JobService.RescheduleJobAsync(selectedJob!.Id, rescheduleModel);
+            ShowAlert("Job rescheduled — a new job has been created with the new schedule.", "success");
+            CloseModals();
+            await RefreshJobs();
+        }
+        catch (Exception ex) { ShowAlert($"Error: {ex.Message}", "danger"); }
+    }
+
+    private async Task DeleteJob()
+    {
+        try
+        {
+            await JobService.DeleteJobAsync(selectedJob!.Id);
+            ShowAlert($"Job '{selectedJob!.Name}' deleted.", "warning");
+            CloseModals();
+            await RefreshJobs();
+        }
+        catch (Exception ex) { ShowAlert($"Error: {ex.Message}", "danger"); }
+    }
+
+    private async Task ToggleJob(JobDto job)
+    {
+        try
+        {
+            var isNowActive = await JobService.ToggleJobStatusAsync(job.Id);
+            ShowAlert($"Job '{job.Name}' is now {(isNowActive ? "active" : "inactive")}.", "info");
+            await RefreshJobs();
+        }
+        catch (Exception ex) { ShowAlert($"Error: {ex.Message}", "danger"); }
+    }
+
+    private void OnCronExpressionChanged()
+    {
+        var (isValid, error) = CronValidator.ValidateCronExpression(formModel.CronExpression ?? "");
+        cronError = isValid ? null : error;
+        cronDescription = isValid ? CronValidator.GetCronDescription(formModel.CronExpression ?? "") : null;
+        StateHasChanged();
+    }
+
+    private void OnRescheduleExpressionChanged()
+    {
+        var (isValid, error) = CronValidator.ValidateCronExpression(rescheduleModel.NewCronExpression ?? "");
+        rescheduleError = isValid ? null : error;
+        rescheduleDescription = isValid ? CronValidator.GetCronDescription(rescheduleModel.NewCronExpression ?? "") : null;
+        StateHasChanged();
+    }
+
+    private void ShowAlert(string message, string type)
+    {
+        alertMessage = message;
+        alertType = type;
+    }
+
+    private static string GetStatusColor(string status) => status switch
+    {
+        "Completed" => "success",
+        "Failed"    => "danger",
+        "Retrying"  => "warning",
+        "Running"   => "info",
+        _           => "secondary"
+    };
+
+    private class FormModel
+    {
+        public string? Name { get; set; }
+        public string? HandlerType { get; set; }
+        public string? CronExpression { get; set; }
+        public int? MaxRetries { get; set; }
+        public int? RetryIntervalSeconds { get; set; }
+        public decimal? BackoffMultiplier { get; set; }
+    }
+}
